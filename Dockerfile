@@ -1,7 +1,14 @@
-FROM --platform=$BUILDPLATFORM caddy:builder AS builder
-ARG TARGETOS
-ARG TARGETARCH
-RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} xcaddy build --with github.com/caddy-dns/cloudflare --with github.com/mholt/caddy-l4
+FROM caddy:builder-alpine AS builder
 
-FROM caddy:latest
+RUN xcaddy build \
+    --with github.com/caddy-dns/cloudflare \
+    --with github.com/mholt/caddy-l4 \
+    --with github.com/lucaslorentz/caddy-docker-proxy/v2
+
+FROM caddy:alpine
+
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+
+ENTRYPOINT ["/bin/caddy"]
+
+CMD ["docker-proxy"]
