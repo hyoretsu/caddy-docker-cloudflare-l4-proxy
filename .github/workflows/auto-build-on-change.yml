@@ -9,31 +9,68 @@ on:
       - main
     paths:
       - Dockerfile
-      - .github/workflows/auto-build-on-change.yml
+      - .github/workflows/**
 
-# Jobs opt into the permissions they need.
-permissions: {}
-
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
-
-env:
-  DOCKERHUB_REPO: lewimbes/caddy-cloudflare-l4
-  GHCR_REPO: ghcr.io/${{ github.repository }}
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   check-updates:
     name: Check for base image updates
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read # list GHCR container versions to detect already-published tags
     outputs:
       needs-updating: ${{ steps.check.outputs.needs-updating }}
     steps:
       - name: Check if Caddy base image updated
         id: check
+        uses: lucacome/docker-image-update-checker@v3
+        with:
+          base-image: caddy:latest
+          # Checks against your GitHub registry instead of Docker Hub
+          image: ghcr.io/${{ github.repository }}:latest 
+
+  build-and-push:
+    name: Build and Push
+    needs: check-updates
+    if: github.event_name != 'schedule' || needs.check-updates.outputs.needs-updating == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
         uses: lucacome/docker-image-update-checker@3233adf42bb1dddf92f18cf024a8e202dbeaa9b3 # v3.1.0
         with:
           base-image: caddy:latest
